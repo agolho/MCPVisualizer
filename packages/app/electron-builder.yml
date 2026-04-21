@@ -1,6 +1,7 @@
 appId: com.dreidel.mcpvisualizer
 productName: MCPVisualizer
 copyright: Copyright © 2026 Yusuf Bektas
+electronVersion: 33.2.0
 
 # Since we run from a monorepo, point electron-builder at the repo root
 # so it can pull in sibling workspaces (viz, ingester, shared).
