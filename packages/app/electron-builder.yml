@@ -66,6 +66,6 @@ linux:
 
 publish:
   - provider: github
-    owner: YBektas
+    owner: agolho
     repo: MCPVisualizer
     releaseType: release
