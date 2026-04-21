@@ -26,6 +26,25 @@ export interface ParsedMethod {
   line: number;
   isStatic: boolean;
   isPublic: boolean;
+  /** Method calls observed inside this method's body. */
+  calls: ParsedCall[];
+}
+
+export interface ParsedCall {
+  /** The method name being invoked, e.g. "Move" from `player.Move(...)`. */
+  name: string;
+  /**
+   * The qualifier expression before the method name, trimmed to the LAST simple identifier.
+   * - `player.Move()` -> "player"
+   * - `this.player.Move()` -> "player"
+   * - `PlayerManager.Instance.Move()` -> "Instance"
+   * - `Move()` (no qualifier) -> null (self-call)
+   * - `ClassName.Static()` -> "ClassName"
+   */
+  qualifier: string | null;
+  /** Best-effort class name hint: if the call looks like `TypeName.Static()` we record TypeName. */
+  typeHint: string | null;
+  line: number;
 }
 
 export interface ParsedSerializedField {
@@ -55,6 +74,8 @@ export interface ParsedType {
   methods: ParsedMethod[];
   serializedFields: ParsedSerializedField[];
   componentRefs: ParsedComponentRef[];
+  /** Maps this class's field/property simple name -> its declared raw type (e.g. "player" -> "Player"). */
+  memberTypes: Record<string, string>;
   line: number;
   isStatic: boolean;
   hasEditorAttr: boolean;
@@ -178,6 +199,7 @@ function walk(node: any, currentNs: string | null, out: ParsedType[]) {
     const methods: ParsedMethod[] = [];
     const serializedFields: ParsedSerializedField[] = [];
     const componentRefs: ParsedComponentRef[] = [];
+    const memberTypes: Record<string, string> = {};
     const body =
       node.childForFieldName?.("body") ??
       findChild(node, ["declaration_list", "enum_member_declaration_list"]);
@@ -187,11 +209,14 @@ function walk(node: any, currentNs: string | null, out: ParsedType[]) {
           const mName = m.childForFieldName?.("name") ?? findChild(m, ["identifier"]);
           if (mName) {
             const mods = collectModifiers(m);
+            const calls: ParsedCall[] = [];
+            walkForCalls(m, calls);
             methods.push({
               name: textOf(mName),
               line: (m.startPosition?.row ?? 0) + 1,
               isStatic: mods.includes("static"),
               isPublic: mods.includes("public"),
+              calls,
             });
           }
           // Dig into method body for GetComponent<T>() / FindObjectOfType<T>()
@@ -199,9 +224,11 @@ function walk(node: any, currentNs: string | null, out: ParsedType[]) {
         } else if (m.type === "field_declaration") {
           const sf = parseSerializedField(m);
           if (sf) serializedFields.push(sf);
+          collectFieldTypes(m, memberTypes);
         } else if (m.type === "property_declaration") {
           const sp = parseSerializedProperty(m);
           if (sp) serializedFields.push(sp);
+          collectPropertyType(m, memberTypes);
         }
         // Recurse for nested types
         walk(m, currentNs, out);
@@ -217,6 +244,7 @@ function walk(node: any, currentNs: string | null, out: ParsedType[]) {
       methods,
       serializedFields,
       componentRefs,
+      memberTypes,
       line: (node.startPosition?.row ?? 0) + 1,
       isStatic,
       hasEditorAttr,
@@ -273,6 +301,126 @@ const TYPE_NODE_TYPES = [
   "tuple_type",
   "implicit_type",
 ];
+
+/**
+ * Walks a method body collecting method-call sites. Resolves the invocation's
+ * function expression into a (qualifier, name, typeHint) triple — enough for
+ * graph.ts to resolve the target class best-effort later.
+ */
+function walkForCalls(node: any, out: ParsedCall[]) {
+  if (node.type === "invocation_expression") {
+    const fn = node.childForFieldName?.("function") ?? null;
+    const info = extractCallTarget(fn);
+    if (info) {
+      out.push({
+        name: info.name,
+        qualifier: info.qualifier,
+        typeHint: info.typeHint,
+        line: (node.startPosition?.row ?? 0) + 1,
+      });
+    }
+    // Don't recurse into the function expression itself, but DO recurse into
+    // the argument list so chained / nested calls are all captured.
+    const args = node.childForFieldName?.("arguments") ?? findChild(node, ["argument_list"]);
+    if (args) walkForCalls(args, out);
+    return;
+  }
+  for (const c of iterChildren(node)) walkForCalls(c, out);
+}
+
+/**
+ * Given a function expression node, returns the called method name, the last
+ * identifier qualifier before it (if any), and — when the qualifier *looks like*
+ * a type (starts with a capital letter and nothing else precedes it) — a type hint.
+ */
+function extractCallTarget(
+  fn: any
+): { name: string; qualifier: string | null; typeHint: string | null } | null {
+  if (!fn) return null;
+
+  if (fn.type === "identifier") {
+    // Bare call: `Foo()`. No qualifier; could be self-call or using-imported static.
+    return { name: textOf(fn), qualifier: null, typeHint: null };
+  }
+
+  if (fn.type === "generic_name") {
+    const nameNode = fn.childForFieldName?.("name") ?? findChild(fn, ["identifier"]);
+    const name = nameNode ? textOf(nameNode) : "";
+    if (!name) return null;
+    return { name, qualifier: null, typeHint: null };
+  }
+
+  if (fn.type === "member_access_expression") {
+    const exprNode = fn.childForFieldName?.("expression") ?? null;
+    const nameNode = fn.childForFieldName?.("name") ?? null;
+    if (!nameNode) return null;
+
+    let methodName: string;
+    if (nameNode.type === "generic_name") {
+      const inner = nameNode.childForFieldName?.("name") ?? findChild(nameNode, ["identifier"]);
+      methodName = inner ? textOf(inner) : "";
+    } else {
+      methodName = textOf(nameNode);
+    }
+    if (!methodName) return null;
+
+    const qualifier = exprNode ? lastIdentifier(exprNode) : null;
+    let typeHint: string | null = null;
+    if (exprNode && exprNode.type === "identifier") {
+      const t = textOf(exprNode);
+      if (t && /^[A-Z]/.test(t)) typeHint = t;
+    }
+    return { name: methodName, qualifier, typeHint };
+  }
+
+  return null;
+}
+
+/** Walks any expression subtree and returns the text of the rightmost simple identifier. */
+function lastIdentifier(node: any): string | null {
+  if (!node) return null;
+  if (node.type === "identifier") return textOf(node) || null;
+  if (node.type === "this_expression") return "this";
+  if (node.type === "member_access_expression") {
+    const nameNode = node.childForFieldName?.("name") ?? null;
+    if (nameNode && nameNode.type === "identifier") return textOf(nameNode) || null;
+    if (nameNode && nameNode.type === "generic_name") {
+      const inner = nameNode.childForFieldName?.("name") ?? findChild(nameNode, ["identifier"]);
+      return inner ? textOf(inner) : null;
+    }
+  }
+  // For anything else (invocation, element_access, cast, etc.) scan the last child.
+  const n = node.childCount ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const c = node.child ? node.child(i) : null;
+    if (!c) continue;
+    const r = lastIdentifier(c);
+    if (r) return r;
+  }
+  return null;
+}
+
+function collectFieldTypes(fieldNode: any, out: Record<string, string>): void {
+  const decl = findChild(fieldNode, ["variable_declaration"]);
+  if (!decl) return;
+  const typeNode = decl.childForFieldName?.("type") ?? findFirstChildAny(decl, TYPE_NODE_TYPES);
+  if (!typeNode) return;
+  const rawType = textOf(typeNode);
+  for (const c of iterChildren(decl)) {
+    if (c.type === "variable_declarator") {
+      const nameNode = c.childForFieldName?.("name") ?? findChild(c, ["identifier"]);
+      if (nameNode) out[textOf(nameNode)] = rawType;
+    }
+  }
+}
+
+function collectPropertyType(propNode: any, out: Record<string, string>): void {
+  const typeNode = propNode.childForFieldName?.("type") ?? findFirstChildAny(propNode, TYPE_NODE_TYPES);
+  const nameNode = propNode.childForFieldName?.("name") ?? findChild(propNode, ["identifier"]);
+  if (typeNode && nameNode) {
+    out[textOf(nameNode)] = textOf(typeNode);
+  }
+}
 
 function walkForComponentRefs(node: any, out: ParsedComponentRef[]) {
   if (node.type === "invocation_expression") {

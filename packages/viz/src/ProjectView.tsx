@@ -24,6 +24,8 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
   const [hideContains, setHideContains] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [reingestBusy, setReingestBusy] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [showMethods, setShowMethods] = useState(false);
 
   const loadProject = (preserveCollapsed = false) =>
     api
@@ -50,6 +52,32 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
         }
       })
       .catch((e) => setErr(e.message));
+
+  // "Show methods" toggle: when on, walk every class and un-collapse the class plus
+  // its full ancestor chain (file, folder, etc.) so methods actually render.
+  const toggleShowMethods = () => {
+    if (!graph) return;
+    const next = !showMethods;
+    setShowMethods(next);
+    const nodeMap = new Map(graph.nodes.map((n) => [n.id, n] as const));
+    setCollapsed((prev) => {
+      const copy = new Set(prev);
+      for (const n of graph.nodes) {
+        if (n.kind !== "class") continue;
+        if (next) {
+          // Expand class + every ancestor.
+          let cur: string | undefined = n.id;
+          while (cur) {
+            copy.delete(cur);
+            cur = nodeMap.get(cur)?.parentId;
+          }
+        } else {
+          copy.add(n.id);
+        }
+      }
+      return copy;
+    });
+  };
 
   useEffect(() => {
     setErr(null);
@@ -136,7 +164,15 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
   const canIndexHere = !meta.portable && !!meta.localRootDir;
 
   return (
-    <div style={{ display: "flex", height: "100vh", width: "100vw", flexDirection: "column" }}>
+    <div
+      style={{
+        display: "flex",
+        height: "100%",
+        width: "100%",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
       {updateBanner}
       <header
         style={{
@@ -147,11 +183,25 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
           background: "#0f1317",
           borderBottom: "1px solid #1f2937",
           flexShrink: 0,
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
         }}
       >
         <button onClick={onBackToWelcome} style={backBtn}>← Projects</button>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.name}</div>
-        <div style={{ fontSize: 11, opacity: 0.5 }}>
+        <div
+          style={{
+            fontSize: 11,
+            opacity: 0.5,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+            flex: "0 1 auto",
+          }}
+          title={meta.source.value}
+        >
           {meta.source.kind === "git" ? "🌐" : "📁"} {meta.source.value}
           {meta.portable && <span style={{ marginLeft: 8, opacity: 0.7 }}>(portable — view only)</span>}
         </div>
@@ -163,7 +213,7 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
         )}
       </header>
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative" }}>
           <GraphView
             graph={visible}
@@ -228,22 +278,72 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
               />
               wiring only
             </label>
+            <label
+              style={{
+                padding: "6px 10px",
+                background: "#111a",
+                borderRadius: 6,
+                fontSize: 12,
+                color: "#c8d0d8",
+                cursor: "pointer",
+                userSelect: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+              title="Expand every class to show its methods"
+            >
+              <input
+                type="checkbox"
+                checked={showMethods}
+                onChange={toggleShowMethods}
+                style={{ accentColor: "#c896ff" }}
+              />
+              show methods
+            </label>
           </div>
           <Legend />
         </div>
-        <NodePanel
-          node={selected}
-          graph={graph}
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-          onReindexed={() => loadProject(true)}
-          projectId={projectId}
-          canIndexHere={canIndexHere}
-        />
+        {panelCollapsed ? (
+          <button
+            onClick={() => setPanelCollapsed(false)}
+            style={railBtnStyle}
+            title="Show details panel"
+          >
+            ‹
+          </button>
+        ) : (
+          <NodePanel
+            node={selected}
+            graph={graph}
+            collapsed={collapsed}
+            onToggleCollapse={toggleCollapse}
+            onReindexed={() => loadProject(true)}
+            projectId={projectId}
+            canIndexHere={canIndexHere}
+            onCollapsePanel={() => setPanelCollapsed(true)}
+          />
+        )}
       </div>
     </div>
   );
 }
+
+const railBtnStyle: React.CSSProperties = {
+  width: 20,
+  flexShrink: 0,
+  background: "#0f1317",
+  borderLeft: "1px solid #1f2937",
+  border: "none",
+  borderTop: "none",
+  borderBottom: "none",
+  color: "#8a95a3",
+  cursor: "pointer",
+  fontSize: 14,
+  padding: 0,
+  writingMode: "vertical-rl",
+  textOrientation: "mixed",
+};
 
 const ghostBtn: React.CSSProperties = {
   padding: "5px 12px",

@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MCPVisualizer</title>
   </head>
-  <body style="margin:0;background:#0b0d10;color:#e6e8eb;font-family:system-ui">
+  <body style="margin:0;background:#0b0d10;color:#e6e8eb;font-family:system-ui;overflow:hidden">
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      body { overflow: hidden; }
+    </style>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

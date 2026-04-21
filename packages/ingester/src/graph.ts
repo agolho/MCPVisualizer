@@ -91,7 +91,12 @@ export async function buildGraph(src: ResolvedSource, opts: BuildOptions): Promi
   // Pass 3: parse each C# file into symbol nodes
   let classCount = 0;
   let methodCount = 0;
-  type TypeIndexEntry = { node: GraphNode; parsed: ParsedType; filePath: string };
+  type TypeIndexEntry = {
+    node: GraphNode;
+    parsed: ParsedType;
+    filePath: string;
+    methodIdByName: Map<string, string>;
+  };
   const typeByFullName = new Map<string, TypeIndexEntry>();
   const typeBySimpleName = new Map<string, TypeIndexEntry[]>();
 
@@ -139,7 +144,13 @@ export async function buildGraph(src: ResolvedSource, opts: BuildOptions): Promi
         });
         classCount++;
 
-        const entry: TypeIndexEntry = { node: nodes.get(classId)!, parsed: t, filePath: file };
+        const methodIdByName = new Map<string, string>();
+        const entry: TypeIndexEntry = {
+          node: nodes.get(classId)!,
+          parsed: t,
+          filePath: file,
+          methodIdByName,
+        };
         typeByFullName.set(t.fullName, entry);
         const arr = typeBySimpleName.get(t.name) ?? [];
         arr.push(entry);
@@ -160,6 +171,8 @@ export async function buildGraph(src: ResolvedSource, opts: BuildOptions): Promi
             target: methodId,
             kind: "contains",
           });
+          // If two methods share a name (overloads), first-wins keeps call resolution deterministic.
+          if (!methodIdByName.has(m.name)) methodIdByName.set(m.name, methodId);
           methodCount++;
         }
       }
@@ -220,6 +233,62 @@ export async function buildGraph(src: ResolvedSource, opts: BuildOptions): Promi
           );
         }
       }
+
+      // Method-call edges: for each method in this class, resolve each call site
+      // to a target class (via member types or TypeName.Static hints) and emit
+      // a method→method "calls" edge when we can pin down the callee too.
+      for (const m of entry.parsed.methods) {
+        const fromMethodId = entry.methodIdByName.get(m.name);
+        if (!fromMethodId) continue;
+        for (const call of m.calls) {
+          // 1) Self-call: no qualifier, resolve against this class.
+          let targetEntry: TypeIndexEntry | undefined;
+          if (call.qualifier === null || call.qualifier === "this") {
+            targetEntry = entry;
+          } else if (call.typeHint) {
+            // 2) `TypeName.Static()` — the qualifier literally looks like a type.
+            const t = stripGenerics(call.typeHint);
+            targetEntry =
+              typeByFullName.get(t) ??
+              (typeBySimpleName.get(t)?.length === 1 ? typeBySimpleName.get(t)![0] : undefined);
+          }
+          if (!targetEntry) {
+            // 3) Qualifier is a field/property of the calling class — look up its type.
+            const memberType = entry.parsed.memberTypes[call.qualifier ?? ""];
+            if (memberType) {
+              for (const cand of typeCandidatesFromRaw(memberType)) {
+                const hit =
+                  typeByFullName.get(cand) ??
+                  (typeBySimpleName.get(cand)?.length === 1 ? typeBySimpleName.get(cand)![0] : undefined);
+                if (hit) {
+                  targetEntry = hit;
+                  break;
+                }
+              }
+            }
+          }
+          if (!targetEntry) continue;
+          if (targetEntry === entry && call.qualifier === null) continue; // skip noisy self-calls
+
+          const calleeMethodId = targetEntry.methodIdByName.get(call.name);
+          if (calleeMethodId && calleeMethodId !== fromMethodId) {
+            addEdge(
+              fromMethodId,
+              calleeMethodId,
+              "calls",
+              `${entry.filePath}:${call.line}  ${call.qualifier ?? ""}${call.qualifier ? "." : ""}${call.name}()`
+            );
+          } else if (targetEntry.node.id !== entry.node.id) {
+            // Callee unknown (external/inherited), but we know the target class.
+            addEdge(
+              fromMethodId,
+              targetEntry.node.id,
+              "references",
+              `${entry.filePath}:${call.line}  ${call.qualifier ?? ""}${call.qualifier ? "." : ""}${call.name}()`
+            );
+          }
+        }
+      }
     }
   }
 
@@ -243,4 +312,25 @@ export async function buildGraph(src: ResolvedSource, opts: BuildOptions): Promi
 function stripGenerics(s: string): string {
   const i = s.indexOf("<");
   return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
+/** Mirrors parse/csharp.ts#typeCandidates for use during edge resolution. */
+function typeCandidatesFromRaw(raw: string): string[] {
+  const out = new Set<string>();
+  const s = raw.replace(/\[\]/g, "").replace(/\?/g, "").trim();
+  const head = stripGenerics(s);
+  if (head) out.add(stripQualifier(head));
+  const inside = s.match(/<([^<>]+)>/g) ?? [];
+  for (const g of inside) {
+    for (const part of g.slice(1, -1).split(",")) {
+      const cleaned = part.trim().replace(/\[\]/g, "").replace(/\?/g, "");
+      if (cleaned) out.add(stripQualifier(stripGenerics(cleaned)));
+    }
+  }
+  return [...out].filter(Boolean);
+}
+
+function stripQualifier(s: string): string {
+  const i = s.lastIndexOf(".");
+  return i === -1 ? s : s.slice(i + 1);
 }

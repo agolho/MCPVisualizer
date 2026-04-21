@@ -11,6 +11,7 @@ interface Props {
   onReindexed?: () => void;
   projectId?: string;
   canIndexHere?: boolean;
+  onCollapsePanel?: () => void;
 }
 
 type IndexState =
@@ -27,6 +28,7 @@ export function NodePanel({
   onReindexed,
   projectId,
   canIndexHere,
+  onCollapsePanel,
 }: Props) {
   const [indexState, setIndexState] = useState<IndexState>({ kind: "idle" });
 
@@ -55,12 +57,42 @@ export function NodePanel({
     <aside
       style={{
         width: 360,
+        flexShrink: 0,
         borderLeft: "1px solid #1f2937",
-        padding: 16,
         overflowY: "auto",
         background: "#0f1317",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "6px 8px 0",
+          flexShrink: 0,
+        }}
+      >
+        {onCollapsePanel && (
+          <button
+            onClick={onCollapsePanel}
+            title="Collapse panel"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#8a95a3",
+              cursor: "pointer",
+              fontSize: 16,
+              lineHeight: 1,
+              padding: "2px 6px",
+            }}
+          >
+            ›
+          </button>
+        )}
+      </div>
+      <div style={{ padding: "0 16px 16px", flex: 1 }}>
       {!node ? (
         <p style={{ opacity: 0.6 }}>
           Click a node to inspect. Click a folder to expand/collapse.
@@ -206,6 +238,7 @@ export function NodePanel({
           )}
         </>
       )}
+      </div>
     </aside>
   );
 }
