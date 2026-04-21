@@ -41,7 +41,9 @@ async function loadIngester(): Promise<IngesterModule> {
       // try next
     }
   }
-  return (await import("@mcpviz/ingester/dist/server.js" as string)) as IngesterModule;
+  throw new Error(
+    `could not locate ingester server.js (searched: ${candidates.join(" | ")})`
+  );
 }
 
 function resolveStaticDir(): string | undefined {
