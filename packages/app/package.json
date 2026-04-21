@@ -1,6 +1,6 @@
 {
   "name": "@mcpviz/app",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "MCPVisualizer desktop app",
   "author": {
@@ -12,7 +12,8 @@
     "build:main": "tsc -p .",
     "build:viz": "npm run build -w @mcpviz/viz",
     "build:ingester": "npm run build -w @mcpviz/ingester",
-    "build": "npm run build:ingester && npm run build:viz && npm run build:main",
+    "copy-bundled": "node scripts/copy-bundled.mjs",
+    "build": "npm run build:ingester && npm run build:viz && npm run build:main && npm run copy-bundled",
     "dev:main": "tsc -p . --watch",
     "dev:electron": "cross-env MCPVIZ_DEV=1 MCPVIZ_VITE_URL=http://localhost:5173 electron dist/main.js",
     "dev": "npm run build:ingester && npm run build:main && concurrently -n viz,electron -c green,cyan \"npm run dev -w @mcpviz/viz\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
@@ -21,7 +22,13 @@
     "release": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "cors": "^2.8.5",
+    "electron-updater": "^6.3.9",
+    "express": "^5.2.1",
+    "fast-glob": "^3.3.2",
+    "simple-git": "^3.27.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

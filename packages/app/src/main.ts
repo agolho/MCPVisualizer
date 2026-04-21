@@ -19,19 +19,13 @@ interface IngesterModule {
 const IS_DEV = !!process.env.MCPVIZ_DEV;
 const VITE_URL = process.env.MCPVIZ_VITE_URL ?? "http://localhost:5173";
 
-// Resolve the ingester as an ESM import regardless of packaging layout.
+// Ingester + viz are copied into packages/app/dist/{ingester,viz} during build,
+// so they live next to this file at runtime — in dev and in the packaged asar.
 async function loadIngester(): Promise<IngesterModule> {
   const candidates = [
+    path.join(__dirname, "ingester", "server.js"),
+    // Dev fallback when running directly from source via tsx.
     path.join(__dirname, "..", "..", "ingester", "dist", "server.js"),
-    path.join(__dirname, "..", "ingester", "dist", "server.js"),
-    path.join(
-      process.resourcesPath ?? "",
-      "app.asar.unpacked",
-      "packages",
-      "ingester",
-      "dist",
-      "server.js"
-    ),
   ];
   for (const c of candidates) {
     try {
@@ -48,9 +42,8 @@ async function loadIngester(): Promise<IngesterModule> {
 
 function resolveStaticDir(): string | undefined {
   const candidates = [
+    path.join(__dirname, "viz"),
     path.join(__dirname, "..", "..", "viz", "dist"),
-    path.join(__dirname, "..", "viz", "dist"),
-    path.join(process.resourcesPath ?? "", "app.asar.unpacked", "packages", "viz", "dist"),
   ];
   for (const c of candidates) {
     try {

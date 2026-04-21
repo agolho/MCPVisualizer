@@ -3,43 +3,22 @@ productName: MCPVisualizer
 copyright: Copyright © 2026 Yusuf Bektas
 electronVersion: 33.2.0
 
-# Since we run from a monorepo, point electron-builder at the repo root
-# so it can pull in sibling workspaces (viz, ingester, shared).
 directories:
   output: release
   buildResources: build
 
-# We ship the Node server in-process: the ingester's `dist/`, the viz build,
-# and shared types all need to be inside the packaged app.
+# Everything we ship lives under packages/app/dist/ — the ingester server
+# and the built viz are copied there by scripts/copy-bundled.mjs as part
+# of the build. Runtime deps (express, cors, fast-glob, etc.) are declared
+# as dependencies in package.json so electron-builder bundles them.
 files:
   - dist/**/*
   - package.json
 
-extraResources:
-  - from: ../../packages/ingester/dist
-    to: app.asar.unpacked/packages/ingester/dist
-  - from: ../../packages/ingester/package.json
-    to: app.asar.unpacked/packages/ingester/package.json
-  - from: ../../packages/ingester/node_modules
-    to: app.asar.unpacked/packages/ingester/node_modules
-    filter:
-      - "**/*"
-      - "!**/*.md"
-      - "!**/*.ts"
-      - "!**/*.map"
-      - "!**/test/**"
-      - "!**/tests/**"
-  - from: ../../packages/viz/dist
-    to: app.asar.unpacked/packages/viz/dist
-  - from: ../../packages/shared
-    to: app.asar.unpacked/packages/shared
-    filter:
-      - "**/*"
-      - "!node_modules/**"
-
 asar: true
 asarUnpack:
   - "**/*.node"
+  - "**/tree-sitter-wasms/out/*.wasm"
 
 win:
   target:
