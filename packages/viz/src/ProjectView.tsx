@@ -7,6 +7,7 @@ import { Legend } from "./Legend";
 import { computeVisible, folderDepth } from "./visibility";
 import { api, type ProjectMeta } from "./api";
 import { getBridge } from "./electron";
+import { StatsModal } from "./StatsModal";
 
 interface Props {
   projectId: string;
@@ -29,6 +30,7 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
   const [showMethods, setShowMethods] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hiddenPopoverOpen, setHiddenPopoverOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const loadProject = (preserveCollapsed = false) =>
     api
@@ -239,6 +241,9 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
           {meta.portable && <span style={{ marginLeft: 8, opacity: 0.7 }}>(portable — view only)</span>}
         </div>
         <div style={{ flex: 1 }} />
+        <button onClick={() => setStatsOpen(true)} style={ghostBtn} title="Project stats">
+          Stats
+        </button>
         <button onClick={handleExport} style={ghostBtn} title="Export as .mcpviz bundle">
           Export…
         </button>
@@ -475,6 +480,18 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
           />
         )}
       </div>
+      {statsOpen && (
+        <StatsModal
+          graph={graph}
+          onClose={() => setStatsOpen(false)}
+          onJumpTo={(id) => {
+            expandAllAncestors(id);
+            unhideNode(id);
+            setSelectedId(id);
+            setFocusId(id);
+          }}
+        />
+      )}
     </div>
   );
 }

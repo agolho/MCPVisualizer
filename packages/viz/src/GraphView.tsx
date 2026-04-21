@@ -37,6 +37,7 @@ export function GraphView({
 }: Props) {
   const fgRef = useRef<any>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [dims, setDims] = useState({ w: window.innerWidth - 360, h: window.innerHeight });
 
   // Persistent position cache across renders — nodes that have already been laid out
@@ -149,7 +150,9 @@ export function GraphView({
     return () => clearTimeout(t);
   }, [focusSubtree, graph, data]);
 
-  const highlight = hoverId ? neighborIds(graph, hoverId) : null;
+  // Pinned click-highlight wins over transient hover. Clear by clicking empty space.
+  const activeId = pinnedId ?? hoverId;
+  const highlight = activeId ? neighborIds(graph, activeId) : null;
 
   const drawNode = (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const n = node as GraphNode & { x: number; y: number };
@@ -171,10 +174,22 @@ export function GraphView({
       ctx.stroke();
       ctx.restore();
     }
+    // Pinned node gets a bright outer ring so the "locked" target is obvious.
+    if (pinnedId === n.id) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = Math.max(1.2, r * 0.35);
+      ctx.strokeStyle = "#ffd76c";
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     if (n.kind === "folder") {
-      // Label visibility: always for hovered/highlighted, else LOD by size + zoom
-      const isEmphasis = hoverId === n.id || (highlight?.has(n.id) ?? false);
+      // Label visibility: always for hovered/highlighted/pinned, else LOD by size + zoom
+      const isEmphasis =
+        activeId === n.id || pinnedId === n.id || (highlight?.has(n.id) ?? false);
       const sizeScore = (n.fileCount ?? 1) * globalScale;
       const showLabel = isEmphasis || sizeScore > 6 || globalScale > 2.2;
       if (showLabel) {
@@ -218,14 +233,14 @@ export function GraphView({
       linkColor={(l: any) => {
         const s = typeof l.source === "object" ? l.source.id : l.source;
         const t = typeof l.target === "object" ? l.target.id : l.target;
-        const touched = hoverId && (s === hoverId || t === hoverId);
-        if (hoverId && !touched) return "rgba(255,255,255,0.03)";
+        const touched = activeId && (s === activeId || t === activeId);
+        if (activeId && !touched) return "rgba(255,255,255,0.03)";
         return edgeColor(l.kind ?? "contains", !!touched);
       }}
       linkWidth={(l: any) => {
         const s = typeof l.source === "object" ? l.source.id : l.source;
         const t = typeof l.target === "object" ? l.target.id : l.target;
-        const touched = hoverId && (s === hoverId || t === hoverId);
+        const touched = activeId && (s === activeId || t === activeId);
         const base = l.kind === "contains" ? 0.5 : 1.1;
         return touched ? base + 1.2 : base;
       }}
@@ -240,8 +255,10 @@ export function GraphView({
       onNodeClick={(n: any) => {
         const node = n as GraphNode;
         onSelect(node);
+        setPinnedId((cur) => (cur === node.id ? null : node.id));
         if (node.kind === "folder") onToggleFolder(node.id);
       }}
+      onBackgroundClick={() => setPinnedId(null)}
       onNodeRightClick={(n: any) => onHideNode?.(n.id)}
     />
   );
