@@ -1,0 +1,18 @@
+{
+  "name": "mcp-visualizer",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "ingest": "npm run start -w @mcpviz/ingester -- ingest",
+    "serve": "npm run start -w @mcpviz/ingester -- serve",
+    "viz": "npm run dev -w @mcpviz/viz",
+    "app:dev": "npm run dev -w @mcpviz/app",
+    "app:pack": "npm run pack -w @mcpviz/app",
+    "app:dist": "npm run dist -w @mcpviz/app",
+    "app:release": "npm run release -w @mcpviz/app"
+  }
+}

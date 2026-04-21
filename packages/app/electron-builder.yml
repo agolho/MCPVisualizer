@@ -1,0 +1,71 @@
+appId: com.dreidel.mcpvisualizer
+productName: MCPVisualizer
+copyright: Copyright © 2026 Yusuf Bektas
+
+# Since we run from a monorepo, point electron-builder at the repo root
+# so it can pull in sibling workspaces (viz, ingester, shared).
+directories:
+  output: release
+  buildResources: build
+
+# We ship the Node server in-process: the ingester's `dist/`, the viz build,
+# and shared types all need to be inside the packaged app.
+files:
+  - dist/**/*
+  - package.json
+
+extraResources:
+  - from: ../../packages/ingester/dist
+    to: app.asar.unpacked/packages/ingester/dist
+  - from: ../../packages/ingester/package.json
+    to: app.asar.unpacked/packages/ingester/package.json
+  - from: ../../packages/ingester/node_modules
+    to: app.asar.unpacked/packages/ingester/node_modules
+    filter:
+      - "**/*"
+      - "!**/*.md"
+      - "!**/*.ts"
+      - "!**/*.map"
+      - "!**/test/**"
+      - "!**/tests/**"
+  - from: ../../packages/viz/dist
+    to: app.asar.unpacked/packages/viz/dist
+  - from: ../../packages/shared
+    to: app.asar.unpacked/packages/shared
+    filter:
+      - "**/*"
+      - "!node_modules/**"
+
+asar: true
+asarUnpack:
+  - "**/*.node"
+
+win:
+  target:
+    - nsis
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - AppImage
+  category: Development
+
+publish:
+  - provider: github
+    owner: YBektas
+    repo: MCPVisualizer
+    releaseType: release
