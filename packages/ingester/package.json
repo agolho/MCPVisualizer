@@ -1,7 +1,6 @@
 {
   "name": "@mcpviz/ingester",
   "version": "0.0.0",
-  "type": "module",
   "bin": {
     "mcpviz-ingest": "./dist/cli.js"
   },

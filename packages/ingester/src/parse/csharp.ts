@@ -1,10 +1,7 @@
-import { createRequire } from "node:module";
 // web-tree-sitter 0.20.x uses a default export with a static Language subclass.
 // Pinned to match the tree-sitter 0.20 ABI that tree-sitter-wasms was built against.
 // @ts-ignore — 0.20.x ships CommonJS without ESM types
 import Parser from "web-tree-sitter";
-
-const require = createRequire(import.meta.url);
 
 let parserPromise: Promise<any> | null = null;
 

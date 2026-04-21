@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 
 interface ServeResult {
   port: number;
@@ -19,40 +18,43 @@ interface IngesterModule {
 const IS_DEV = !!process.env.MCPVIZ_DEV;
 const VITE_URL = process.env.MCPVIZ_VITE_URL ?? "http://localhost:5173";
 
-// Ingester + viz are copied into packages/app/dist/{ingester,viz} during build,
-// so they live next to this file at runtime — in dev and in the packaged asar.
+// Ingester is built as CommonJS so Electron's asar shim can require() it
+// transparently. It's copied into packages/app/dist/ingester/ during build.
 async function loadIngester(): Promise<IngesterModule> {
   const candidates = [
     path.join(__dirname, "ingester", "server.js"),
-    // Dev fallback when running directly from source via tsx.
+    // Dev fallback when running directly from source.
     path.join(__dirname, "..", "..", "ingester", "dist", "server.js"),
   ];
+  const errors: string[] = [];
   for (const c of candidates) {
     try {
       await fs.access(c);
-      return (await import(pathToFileURL(c).href)) as IngesterModule;
-    } catch {
-      // try next
+      return require(c) as IngesterModule;
+    } catch (e) {
+      errors.push(`${c} -> ${(e as Error).message}`);
     }
   }
-  throw new Error(
-    `could not locate ingester server.js (searched: ${candidates.join(" | ")})`
-  );
+  throw new Error(`could not locate ingester server.js:\n${errors.join("\n")}`);
 }
 
 function resolveStaticDir(): string | undefined {
+  // Check for index.html rather than the dir — fs.accessSync on bare directories
+  // inside an asar can be flaky depending on Electron's shim version.
   const candidates = [
     path.join(__dirname, "viz"),
     path.join(__dirname, "..", "..", "viz", "dist"),
   ];
+  const fsSync = require("node:fs") as typeof import("node:fs");
   for (const c of candidates) {
     try {
-      require("node:fs").accessSync(c);
+      fsSync.accessSync(path.join(c, "index.html"));
       return c;
     } catch {
       // skip
     }
   }
+  console.warn("[mcpviz] resolveStaticDir: none of", candidates, "had index.html");
   return undefined;
 }
 
