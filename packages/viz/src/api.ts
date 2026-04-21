@@ -8,6 +8,7 @@ export interface ProjectSource {
 
 export interface ProjectViewState {
   collapsed?: string[];
+  hidden?: string[];
   selectedId?: string | null;
   hideContainsEdges?: boolean;
 }

@@ -5,7 +5,11 @@ export function folderDepth(path: string): number {
   return path.split("/").length;
 }
 
-export function computeVisible(graph: Graph, collapsed: Set<string>): Graph {
+export function computeVisible(
+  graph: Graph,
+  collapsed: Set<string>,
+  hidden: Set<string> = new Set()
+): Graph {
   const byId = new Map<string, GraphNode>();
   const childrenOf = new Map<string, string[]>();
   for (const n of graph.nodes) byId.set(n.id, n);
@@ -16,19 +20,19 @@ export function computeVisible(graph: Graph, collapsed: Set<string>): Graph {
     childrenOf.set(n.parentId, arr);
   }
 
-  const hidden = new Set<string>();
+  const dropped = new Set<string>(hidden);
   const walk = (rootId: string) => {
     const stack = [...(childrenOf.get(rootId) ?? [])];
     while (stack.length) {
       const id = stack.pop()!;
-      if (hidden.has(id)) continue;
-      hidden.add(id);
+      if (dropped.has(id)) continue;
+      dropped.add(id);
       stack.push(...(childrenOf.get(id) ?? []));
     }
   };
   for (const id of collapsed) walk(id);
 
-  const visibleNodes = graph.nodes.filter((n) => !hidden.has(n.id));
+  const visibleNodes = graph.nodes.filter((n) => !dropped.has(n.id));
   const visibleIds = new Set(visibleNodes.map((n) => n.id));
   const visibleEdges = graph.edges.filter((e: GraphEdge) => {
     const s = typeof e.source === "string" ? e.source : (e.source as any).id;

@@ -9,6 +9,7 @@ interface Props {
   graph: Graph;
   onSelect: (n: GraphNode) => void;
   onToggleFolder: (id: string) => void;
+  onHideNode?: (id: string) => void;
   focusId?: string | null;
   onFocusConsumed?: () => void;
   focusSubtree?: { id: string; tick: number } | null;
@@ -28,6 +29,7 @@ export function GraphView({
   graph,
   onSelect,
   onToggleFolder,
+  onHideNode,
   focusId,
   onFocusConsumed,
   focusSubtree,
@@ -37,6 +39,10 @@ export function GraphView({
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [dims, setDims] = useState({ w: window.innerWidth - 360, h: window.innerHeight });
 
+  // Persistent position cache across renders — nodes that have already been laid out
+  // get pinned (fx/fy) so toggling visibility doesn't re-simulate the entire graph.
+  const positions = useRef<Map<string, { x: number; y: number }>>(new Map());
+
   useEffect(() => {
     const on = () => setDims({ w: window.innerWidth - 360, h: window.innerHeight });
     window.addEventListener("resize", on);
@@ -45,14 +51,40 @@ export function GraphView({
 
   const data = useMemo(() => {
     const kindOrder: Record<string, number> = { folder: 0, file: 1, class: 2, method: 3, field: 3 };
-    const nodes = graph.nodes
-      .slice()
-      .sort((a, b) => {
-        const d = nodeRadius(b) - nodeRadius(a);
-        if (d !== 0) return d;
-        return (kindOrder[a.kind] ?? 5) - (kindOrder[b.kind] ?? 5);
-      })
-      .map((n) => ({ ...n }));
+
+    // Build a parent map so new, unpositioned nodes can be seeded near their parent —
+    // massively reduces the amount the sim has to do on first reveal.
+    const parentById = new Map<string, string | undefined>();
+    for (const n of graph.nodes) parentById.set(n.id, n.parentId);
+
+    const sorted = graph.nodes.slice().sort((a, b) => {
+      const d = nodeRadius(b) - nodeRadius(a);
+      if (d !== 0) return d;
+      return (kindOrder[a.kind] ?? 5) - (kindOrder[b.kind] ?? 5);
+    });
+
+    const nodes = sorted.map((n) => {
+      const known = positions.current.get(n.id);
+      if (known) {
+        // Pin stabilized nodes so they stop moving entirely.
+        return { ...n, x: known.x, y: known.y, fx: known.x, fy: known.y };
+      }
+      // Unknown node — seed near its nearest known ancestor (keeps new methods close to their class).
+      let cur: string | undefined = n.parentId;
+      while (cur) {
+        const anc = positions.current.get(cur);
+        if (anc) {
+          return {
+            ...n,
+            x: anc.x + (Math.random() - 0.5) * 10,
+            y: anc.y + (Math.random() - 0.5) * 10,
+          };
+        }
+        cur = parentById.get(cur);
+      }
+      return { ...n };
+    });
+
     const links = graph.edges
       .filter((e) => !(hideContainsEdges && e.kind === "contains"))
       .map((e) => ({ ...e }));
@@ -70,8 +102,23 @@ export function GraphView({
       "collide",
       forceCollide<any>((n) => nodeRadius(n) + 3).strength(0.9)
     );
-    fg.d3ReheatSimulation?.();
+    // Only reheat when there are unpinned nodes to lay out — otherwise the sim
+    // idles and the render stays still.
+    const hasUnpinned = data.nodes.some((n: any) => n.fx === undefined);
+    if (hasUnpinned) fg.d3ReheatSimulation?.();
   }, [data]);
+
+  // Snapshot positions once the simulation settles so future toggles stay pinned.
+  const captureOnStop = () => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const n of data.nodes as any[]) {
+      if (typeof n.x === "number" && typeof n.y === "number") {
+        positions.current.set(n.id, { x: n.x, y: n.y });
+      }
+    }
+  };
 
   useEffect(() => {
     if (!focusId || !fgRef.current) return;
@@ -185,8 +232,9 @@ export function GraphView({
       linkDirectionalArrowLength={(l: any) => (l.kind === "contains" ? 0 : 3)}
       linkDirectionalArrowRelPos={0.92}
       linkDirectionalArrowColor={(l: any) => edgeColor(l.kind ?? "contains", false)}
-      cooldownTicks={180}
-      d3VelocityDecay={0.3}
+      cooldownTicks={90}
+      d3VelocityDecay={0.4}
+      onEngineStop={captureOnStop}
       backgroundColor="#0b0d10"
       onNodeHover={(n: any) => setHoverId(n ? n.id : null)}
       onNodeClick={(n: any) => {
@@ -194,6 +242,7 @@ export function GraphView({
         onSelect(node);
         if (node.kind === "folder") onToggleFolder(node.id);
       }}
+      onNodeRightClick={(n: any) => onHideNode?.(n.id)}
     />
   );
 }

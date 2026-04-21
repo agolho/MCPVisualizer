@@ -6,6 +6,7 @@ import { SearchBar } from "./SearchBar";
 import { Legend } from "./Legend";
 import { computeVisible, folderDepth } from "./visibility";
 import { api, type ProjectMeta } from "./api";
+import { getBridge } from "./electron";
 
 interface Props {
   projectId: string;
@@ -26,6 +27,8 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
   const [reingestBusy, setReingestBusy] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [showMethods, setShowMethods] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [hiddenPopoverOpen, setHiddenPopoverOpen] = useState(false);
 
   const loadProject = (preserveCollapsed = false) =>
     api
@@ -49,6 +52,7 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
           if (typeof m.viewState?.hideContainsEdges === "boolean") {
             setHideContains(m.viewState.hideContainsEdges);
           }
+          setHidden(new Set(m.viewState?.hidden ?? []));
         }
       })
       .catch((e) => setErr(e.message));
@@ -93,17 +97,27 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
       api
         .saveViewState(projectId, {
           collapsed: [...collapsed],
+          hidden: [...hidden],
           hideContainsEdges: hideContains,
         })
         .catch(() => {});
     }, 800);
     return () => clearTimeout(h);
-  }, [collapsed, hideContains, projectId, graph, meta]);
+  }, [collapsed, hidden, hideContains, projectId, graph, meta]);
 
   const visible = useMemo(
-    () => (graph ? computeVisible(graph, collapsed) : null),
-    [graph, collapsed]
+    () => (graph ? computeVisible(graph, collapsed, hidden) : null),
+    [graph, collapsed, hidden]
   );
+
+  const hideNode = (id: string) => setHidden((s) => new Set(s).add(id));
+  const unhideNode = (id: string) =>
+    setHidden((s) => {
+      const next = new Set(s);
+      next.delete(id);
+      return next;
+    });
+  const unhideAll = () => setHidden(new Set());
 
   const nodeById = useMemo(() => {
     const m = new Map<string, GraphNode>();
@@ -146,6 +160,25 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
       setErr((e as Error).message);
     } finally {
       setReingestBusy(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!meta) return;
+    const bridge = getBridge();
+    try {
+      if (bridge) {
+        const res = await fetch(api.exportUrl(projectId));
+        const raw = await res.text();
+        await bridge.exportProjectDialog({
+          suggestedName: `${meta.name}.mcpviz`,
+          content: raw,
+        });
+      } else {
+        window.open(api.exportUrl(projectId), "_blank");
+      }
+    } catch (e) {
+      setErr((e as Error).message);
     }
   };
 
@@ -206,6 +239,9 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
           {meta.portable && <span style={{ marginLeft: 8, opacity: 0.7 }}>(portable — view only)</span>}
         </div>
         <div style={{ flex: 1 }} />
+        <button onClick={handleExport} style={ghostBtn} title="Export as .mcpviz bundle">
+          Export…
+        </button>
         {canReingest && (
           <button onClick={handleReingest} style={ghostBtn} disabled={reingestBusy}>
             {reingestBusy ? "Re-ingesting…" : "Re-ingest"}
@@ -214,11 +250,15 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
       </header>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <div style={{ flex: 1, position: "relative" }}>
+        <div
+          style={{ flex: 1, position: "relative" }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
           <GraphView
             graph={visible}
             onSelect={(n) => setSelectedId(n.id)}
             onToggleFolder={toggleCollapse}
+            onHideNode={hideNode}
             focusId={focusId}
             onFocusConsumed={() => setFocusId(null)}
             focusSubtree={focusSubtree}
@@ -301,6 +341,115 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
               />
               show methods
             </label>
+            {hidden.size > 0 && (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setHiddenPopoverOpen((v) => !v)}
+                  style={{
+                    padding: "6px 10px",
+                    background: "#3a2530",
+                    border: "1px solid #552a3a",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: "#ff9abf",
+                    cursor: "pointer",
+                  }}
+                  title="Click to manage hidden nodes"
+                >
+                  Hidden {hidden.size}
+                </button>
+                {hiddenPopoverOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 4px)",
+                      left: 0,
+                      background: "#0f1317",
+                      border: "1px solid #1f2937",
+                      borderRadius: 6,
+                      padding: 8,
+                      minWidth: 260,
+                      maxHeight: 320,
+                      overflowY: "auto",
+                      zIndex: 20,
+                      boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase" }}>
+                        Hidden nodes
+                      </span>
+                      <button
+                        onClick={unhideAll}
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          background: "transparent",
+                          color: "#6cb4ff",
+                          border: "1px solid #26303c",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Unhide all
+                      </button>
+                    </div>
+                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                      {[...hidden].map((id) => {
+                        const n = nodeById.get(id);
+                        return (
+                          <li
+                            key={id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "3px 0",
+                              fontSize: 12,
+                              color: "#c8d0d8",
+                            }}
+                          >
+                            <span style={{ opacity: 0.5, fontSize: 10 }}>{n?.kind ?? "?"}</span>
+                            <span
+                              style={{
+                                flex: 1,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={n?.path ?? id}
+                            >
+                              {n?.label ?? id}
+                            </span>
+                            <button
+                              onClick={() => unhideNode(id)}
+                              style={{
+                                padding: "2px 6px",
+                                fontSize: 11,
+                                background: "#1a222c",
+                                color: "#9ee39e",
+                                border: "1px solid #26303c",
+                                borderRadius: 3,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Unhide
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <Legend />
         </div>
@@ -322,6 +471,7 @@ export function ProjectView({ projectId, onBackToWelcome, updateBanner }: Props)
             projectId={projectId}
             canIndexHere={canIndexHere}
             onCollapsePanel={() => setPanelCollapsed(true)}
+            onHideNode={hideNode}
           />
         )}
       </div>

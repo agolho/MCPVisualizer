@@ -12,6 +12,7 @@ interface Props {
   projectId?: string;
   canIndexHere?: boolean;
   onCollapsePanel?: () => void;
+  onHideNode?: (id: string) => void;
 }
 
 type IndexState =
@@ -29,6 +30,7 @@ export function NodePanel({
   projectId,
   canIndexHere,
   onCollapsePanel,
+  onHideNode,
 }: Props) {
   const [indexState, setIndexState] = useState<IndexState>({ kind: "idle" });
 
@@ -107,6 +109,21 @@ export function NodePanel({
           <code style={{ fontSize: 12, opacity: 0.7, wordBreak: "break-all" }}>
             {node.path || "/"}
           </code>
+          {onHideNode && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                onClick={() => onHideNode(node.id)}
+                style={{
+                  ...buttonStyle,
+                  color: "#ff9abf",
+                  borderColor: "#552a3a",
+                }}
+                title="Hide this node from the graph (right-click a node to hide it too)"
+              >
+                Hide node
+              </button>
+            </div>
+          )}
 
           {node.kind === "folder" && (
             <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
